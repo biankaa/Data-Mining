@@ -1,0 +1,63 @@
+---
+title: "Credit_Analysis_1"
+author: "Ka Bian"
+date: "11/21/2017"
+output: word_document
+---
+```{r}
+##Q1.Data Preparation
+credit <- read.csv("G:/Data mining/HW5/credit3 (1) .csv",stringsAsFactors=F)
+credit$NPV<-gsub(",","",credit$NPV)
+credit$AMOUNT_REQUESTED<-gsub(",","",credit$AMOUNT_REQUESTED)
+credit$CREDIT_EXTENDED <- gsub(",","",credit$CREDIT_EXTENDED)
+
+credit$NPV <- as.numeric(credit$NPV)
+credit$AMOUNT_REQUESTED <- as.numeric(credit$AMOUNT_REQUESTED)
+credit$CREDIT_EXTENDED <- as.numeric(credit$CREDIT_EXTENDED)
+credit$PROF <- ifelse(credit$NPV>0,1,0)
+credit$CHK_ACCT <- as.factor(credit$CHK_ACCT)
+credit$SAV_ACCT <- as.factor(credit$SAV_ACCT)
+credit$HISTORY <- as.factor(credit$HISTORY)
+credit$JOB <- as.factor(credit$JOB)
+credit$TYPE<- as.factor(credit$TYPE)
+credit$PROF <- as.factor(credit$PROF)
+credit[,1] <- NULL
+credit$CREDIT_EXTENDED<- NULL
+credit$PROF <- NULL
+set.seed(12345)
+inTrain = sample(nrow(credit), 0.7 * nrow(credit))
+train <- credit[inTrain, ]
+valid <- credit[-inTrain, ]
+
+
+```
+
+
+
+```{r}
+linear.credit<-lm(NPV~.,train)
+summary(linear.credit)
+linear.pred<-predict(linear.credit,train)
+Q9df<-data.frame(linear.pred,train$NPV)
+Value=Q9df[order(Q9df$linear.pred), ]
+len=length(Value$linear.pred)
+total.profit = c(0)
+Value <- data.frame(Value, total.profit)
+
+for (i in 1:len) {
+  Value$total.profit[i] =sum(Value$train.NPV[Value$linear.pred>Value$linear.pred[i]])
+}
+z=max(Value$total.profit)
+z
+cutoff=Value$linear.pred[Value$total.profit==z]
+cutoff
+
+lmpredv <- predict(linear.credit,valid)
+extend<-ifelse(lmpredv>cutoff,1,0)
+table(extend)
+mean.Prof=mean(lmpredv[lmpredv>cutoff])
+overall.Prof=sum(valid$NPV[lmpredv>cutoff])
+mean.Prof
+overall.Prof
+```
+
