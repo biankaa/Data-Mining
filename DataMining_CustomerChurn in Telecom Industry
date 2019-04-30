@@ -1,0 +1,1201 @@
+---
+title: "DataMining_CustomerChurn in Telecom Industry"
+output: html_document
+---
+
+---
+title: "Customer Churn in Telecom Industry
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r}
+#Loading the raw data file
+base_data <- read.csv("Telco_Customer_Project.csv", header = TRUE) #Cleaned file
+
+
+str(base_data)
+
+```
+```{r}
+#Analysis of unclean Excel sheet (Unclean refers to certain columns having three factors instead of two). The pipe function gives us the frequency of eacg factors. All of these values have been cleaned before importing the dataset as seen in the previous chunk of code
+
+base_data_raw <- read.csv("Telco_Customer_Churn_v2.csv", header = TRUE) 
+## Has No internet service as one of the values
+
+base_data_raw %>% keep(is.factor) %>% gather() %>% ggplot(aes(value)) +                        facet_wrap(~ key, scales = "free") +   
+          geom_histogram(stat = "count") 
+
+```
+
+
+```{r}
+#Variable SeniorCitizen is identified as int. Converting it to factor
+base_data$SeniorCitizen <- as.factor(base_data$SeniorCitizen)
+
+str(base_data)
+```
+```{r}
+#Installing and loading the packages
+require('purrr')
+require('tidyr')
+require('plyr')
+require('ggplot2')
+require('GoodmanKruskal')
+require('VIM')
+require('caret')
+require('mice')
+require('dummies')
+require('MASS')
+require('lattice')
+require('ROCR')
+require('e1071')
+require('rpart')
+require('rpart.plot')
+require('caTools')
+require('randomForest')
+require('gbm')
+require('verification')
+```
+
+
+```{r}
+vars <- c("Dependents","PhoneService","MultipleLines","InternetService","OnlineSecurity","OnlineBackup","DeviceProtection","TechSupport","StreamingTV","StreamingMovies","Contract","PaperlessBilling","PaymentMethod")
+
+churn_frame <- subset(base_data, select = vars)
+GKmatrix1 <- GKtauDataframe(churn_frame)
+plot(GKmatrix1)
+```
+
+
+```{r}
+#customerID as factor does not make sense. Converting it to character
+
+base_data$customerID <- as.character(base_data$customerID)
+summary(base_data)
+```
+
+
+
+```{r}
+#Exploratory data analysis - Frequency count of categorical  variables using pipes
+
+base_data %>% keep(is.factor) %>% gather() %>% ggplot(aes(value)) +                        facet_wrap(~ key, scales = "free") +   
+    geom_histogram(stat = "count")                       
+```
+
+
+```{r}
+#Creating histograms for continuous variables for visualizaing the distributions
+
+ggplot(base_data, aes(x = MonthlyCharges)) +
+        geom_histogram(aes(fill = ..count..), binwidth = 5)
+
+ggplot(base_data, aes(x = TotalCharges)) +
+        geom_histogram(aes(fill = ..count..), binwidth = 1000)
+
+ggplot(base_data, aes(x = tenure)) +
+        geom_histogram(aes(fill = ..count..), binwidth = 5)
+```
+
+
+
+```{r}
+aggr(base_data, prop = F, numbers = T)
+```
+
+
+
+```{r}
+
+#Imputing missing values using predcitive mean matching algorithm
+tempData_base_data <- mice(base_data,m=5,maxit=50,meth='pmm',seed=500)
+summary(tempData_base_data)
+
+complete_base_data <- complete(tempData_base_data, 4)
+summary(complete_base_data)
+```
+
+```{r}
+#Checking for missing values
+summary(complete_base_data)
+```
+
+```{r}
+#Function to create bins of continuous variable, tenure
+tenure_bins <- function(tenure){
+    if (tenure >= 0 && tenure <= 6){
+        return('0-6 Months')
+    }else if(tenure > 6 && tenure <= 12){
+        return('6-12 Months')
+    }else if (tenure > 12 && tenure <= 24){
+        return('12-24 Months')
+    }else if (tenure > 24 && tenure <=36){
+        return('24-36 Months')
+    }else if (tenure > 36 && tenure <=48){
+        return('36-48 Months')
+    }else if (tenure > 48 && tenure <= 62){
+        return('48-62 Months')
+    }else if (tenure > 62){
+        return('> 62 Months')
+    }
+}
+```
+
+```{r}
+#Creating tenure interval (factor) variable by applying previous function
+complete_base_data$tenure_interval <- sapply(complete_base_data$tenure, tenure_bins)
+complete_base_data$tenure_interval <- as.factor(complete_base_data$tenure_interval)
+```
+
+```{r}
+str(complete_base_data)
+```
+
+```{r}
+complete_base_data$customerID <- NULL
+complete_base_data$tenure <- NULL
+str(complete_base_data)
+```
+
+```{r}
+complete_base_data <- complete_base_data[, c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,20,19)]
+churn <- complete_base_data
+```
+
+## Logistic Regression
+
+```{r}
+#preprocessiong
+
+set.seed(12345)
+churn$gender <- ifelse(churn$gender =="Female", 1, 0)
+churn$Partner <- ifelse(churn$Partner =="Yes", 1, 0)
+churn$Dependents <- ifelse(churn$Dependents =="Yes", 1, 0)
+churn$PhoneService<- ifelse(churn$PhoneService =="Yes", 1, 0)
+churn$MultipleLines <- ifelse(churn$MultipleLines =="Yes", 1, 0)
+churn$InternetService <- ifelse(churn$InternetService =="DSL", 1, ifelse(churn$InternetService =="Fiber optic", 2, 0))
+churn$OnlineSecurity <- ifelse(churn$OnlineSecurity =="Yes", 1, 0)
+churn$OnlineBackup <- ifelse(churn$OnlineBackup =="Yes", 1, 0)
+churn$DeviceProtection <- ifelse(churn$DeviceProtection =="Yes", 1, 0)
+churn$TechSupport <- ifelse(churn$TechSupport =="Yes", 1, 0)
+churn$StreamingTV <- ifelse(churn$StreamingTV =="Yes", 1, 0)
+churn$StreamingMovies <- ifelse(churn$StreamingMovies =="Yes", 1, 0)
+churn$Contract <- ifelse(churn$Contract =="One year", 1, ifelse(churn$Contract =="Two year", 2, 0))
+churn$PaperlessBilling <- ifelse(churn$PaperlessBilling =="Yes", 1, 0)
+churn$PaymentMethod <- ifelse(churn$PaymentMethod =="Electronic check", 1, ifelse(churn$PaymentMethod =="Mailed check", 2, ifelse(churn$PaymentMethod =="Credit card (automatic)", 3, 0)))
+churn$Churn<- ifelse(churn$Churn =="Yes", 1, 0)
+churn$customerID <- NULL
+
+#create factors
+#churn[1:16] <- lapply(churn[1:16],factor)
+#churn$tenure_interval<-as.factor(churn$tenure_interval)
+#churn
+#str(churn)
+
+
+#create dummy variables
+library(dummies)
+dum <- dummy.data.frame(churn, names = c("InternetService","Contract", "PaymentMethod","tenure_interval") , sep = ".")
+str(dum)
+library(caret)
+library(lattice)
+library(ggplot2)
+set.seed(12345)
+# 0.7 train, 0.3 validation
+train = sample(nrow(dum), 0.7 * nrow(dum))
+
+dumtrain <- data.frame(dum[train, ])
+dumtest <- data.frame(dum[-train, ])
+names(dumtrain)
+```
+```{r}
+# full logistic regression model
+full =glm(Churn~gender+SeniorCitizen+Partner+Dependents+PhoneService+MultipleLines+InternetService.0+InternetService.1+OnlineSecurity+OnlineBackup+DeviceProtection+TechSupport+StreamingTV+StreamingMovies+Contract.0+Contract.1+PaperlessBilling+PaymentMethod.0+PaymentMethod.1+PaymentMethod.2+MonthlyCharges+TotalCharges+tenure_interval...62.Months+tenure_interval.0.6.Months+tenure_interval.12.24.Months+tenure_interval.24.36.Months+tenure_interval.36.48.Months+tenure_interval.48.62.Months,data = dumtrain,family="binomial")
+
+```
+
+```{r}
+
+#feature selection with steopwise method AIC
+library(MASS)
+step<-stepAIC(full, trace=FALSE)
+step$anova
+#Final Model:
+#Churn ~ SeniorCitizen + Dependents + MultipleLines + InternetService.0 + 
+ #   InternetService.1 + OnlineSecurity + StreamingTV + StreamingMovies + 
+  #  Contract.0 + Contract.1 + PaperlessBilling + PaymentMethod.1 + 
+   # MonthlyCharges + tenure_interval...62.Months + tenure_interval.0.6.Months + 
+    #tenure_interval.12.24.Months + tenure_interval.24.36.Months + 
+    #tenure_interval.36.48.Months + tenure_interval.48.62.Months
+
+BIC<-stepAIC(full,k=log(nrow(dumtrain)))
+BIC$anova
+#Final Model:
+#Churn ~ MultipleLines + InternetService.0 + InternetService.1 + 
+ #   StreamingTV + StreamingMovies + Contract.0 + Contract.1 + 
+  #  PaperlessBilling + PaymentMethod.1 + MonthlyCharges + tenure_interval...62.Months + 
+   # tenure_interval.0.6.Months + tenure_interval.24.36.Months + 
+    #tenure_interval.36.48.Months + tenure_interval.48.62.Months
+```
+```{r}
+#three model: full, AIC, BIC
+model_AIC=glm(Churn ~ SeniorCitizen + Dependents + MultipleLines + InternetService.0 + 
+    InternetService.1 + OnlineSecurity + StreamingTV + StreamingMovies + 
+    Contract.0 + Contract.1 + PaperlessBilling + PaymentMethod.1 + 
+    MonthlyCharges + tenure_interval...62.Months + tenure_interval.0.6.Months + 
+    tenure_interval.12.24.Months + tenure_interval.24.36.Months + 
+    tenure_interval.36.48.Months + tenure_interval.48.62.Months,data = dumtrain,family="binomial")
+model_BIC=glm(Churn ~ MultipleLines + InternetService.0 + InternetService.1 + 
+    StreamingTV + StreamingMovies + Contract.0 + Contract.1 + 
+    PaperlessBilling + PaymentMethod.1 + MonthlyCharges + tenure_interval...62.Months + 
+    tenure_interval.0.6.Months + tenure_interval.24.36.Months + 
+    tenure_interval.36.48.Months + tenure_interval.48.62.Months,data = dumtrain,family="binomial")
+summary(full)
+summary(model_AIC)
+summary(model_BIC)
+
+```
+
+```{r}
+#compare three model MSE:
+test <- dumtest
+pred_full <- predict(full, newdata = test,type="response")
+pred_full<-ifelse(pred_full>=0.5,1,0)
+pred_full_MSE <- mean((test$Churn - pred_full) ^ 2)
+pred_full_MSE
+
+test <- dumtest
+pred_AIC <- predict(model_AIC, newdata = test,type="response")
+pred_AIC<-ifelse(pred_AIC>=0.5,1,0)
+pred_AIC_MSE <- mean((test$Churn - pred_AIC) ^ 2)
+pred_AIC_MSE
+
+test <- dumtest
+pred_BIC<- predict(model_BIC, newdata = test,type="response")
+pred_BIC<-ifelse(pred_BIC>=0.5,1,0)
+pred_BIC_MSE <- mean((test$Churn - pred_BIC) ^ 2)
+pred_BIC_MSE
+
+
+Method <- c("full","AIC","BIC")
+MSE <- c(pred_full_MSE,pred_AIC_MSE, pred_BIC_MSE)
+data.frame(Method, MSE)
+```
+```{r}
+
+#########confusion matrices
+#for full 
+pred_test_full <- predict(full, dumtest, type="response")
+pred_test_c_full <- ifelse(pred_test_full >= 0.5, 1, 0)
+confusion_test_full<-table(dumtest$Churn, pred_test_c_full)
+confusion_test_full
+  # pred_test_c_full
+  #     0    1
+  #0 1404  152
+  #1  277  280
+accuracy_test_full<-(confusion_test_full[2,2]+confusion_test_full[1,1])/sum(confusion_test_full)
+accuracy_test_full #0.7969711
+# for model_AIC
+pred_test_AIC <- predict(model_AIC, dumtest, type="response")
+pred_test_c_AIC <- ifelse(pred_test_AIC >= 0.5, 1, 0)
+confusion_test_AIC<-table(dumtest$Churn, pred_test_c_AIC)
+confusion_test_AIC
+  # pred_test_c_AIC
+  #   0    1
+  #0 1402  154
+  #1  275  282
+accuracy_test_AIC<-(confusion_test_AIC[2,2]+confusion_test_AIC[1,1])/sum(confusion_test_AIC)
+accuracy_test_AIC #0.7969711
+# for model_BIC
+pred_test_BIC <- predict(model_BIC, dumtest, type="response")
+pred_test_c_BIC <- ifelse(pred_test_BIC >= 0.5, 1, 0)
+confusion_test_BIC<-table(dumtest$Churn, pred_test_c_BIC)
+confusion_test_BIC
+  #pred_test_c_BIC
+  #     0    1
+  #0 1408  148
+  #1  278  279
+accuracy_test_BIC<-(confusion_test_BIC[2,2]+confusion_test_BIC[1,1])/sum(confusion_test_BIC)
+accuracy_test_BIC #0.7983909
+
+##########ROC curves
+library(ROCR)
+pred_test_full <-prediction(pred_test_full,dumtest$Churn)
+roc_test_full <- performance(pred_test_full,"tpr", "fpr")
+plot(roc_test_full,main="ROC Curve",ylab="Sensitivity",xlab="1-Specificity",col="red")
+abline(a=0,b=1)
+
+pred_test_AIC <-prediction(pred_test_AIC,dumtest$Churn)
+roc_test_AIC <- performance(pred_test_AIC,"tpr", "fpr")
+plot(roc_test_AIC,main="ROC Curve",ylab="Sensitivity",xlab="1-Specificity",add=TRUE,col="blue")
+abline(a=0,b=1)
+
+pred_test_BIC <-prediction(pred_test_BIC,dumtest$Churn)
+roc_test_BIC <- performance(pred_test_BIC,"tpr", "fpr")
+plot(roc_test_BIC,main="ROC Curve",ylab="Sensitivity",xlab="1-Specificity",add=TRUE,col="green")
+abline(a=0,b=1)
+legend(0.7, 0.3, legend=c("full", "AIC","BIC"),
+       col=c("red", "blue","green"), lty=1)
+
+##### Accuracy cutoff plot
+
+eval_test_full<-performance(pred_test_full,"acc")
+plot(eval_test_full,col="red")
+eval_test_AIC<-performance(pred_test_AIC,"acc")
+plot(eval_test_AIC,col="blue",add=TRUE)
+eval_test_BIC<-performance(pred_test_BIC,"acc")
+plot(eval_test_BIC,col="green",add=TRUE)
+legend(0.7, 0.3, legend=c("full", "AIC","BIC"),
+       col=c("red", "blue","green"), lty=1)
+
+##### max accuracy cutoff for testing
+max1<-which.max(slot(eval_test_full,"y.values")[[1]])
+acc1<-slot(eval_test_full,"y.values")[[1]][max1]
+cut1<-slot(eval_test_full,"x.values")[[1]][max1]
+print(c(Accuracy_full=acc1, Cutoff_full=cut1))
+
+max2<-which.max(slot(eval_test_AIC,"y.values")[[1]])
+acc2<-slot(eval_test_AIC,"y.values")[[1]][max2]
+cut2<-slot(eval_test_AIC,"x.values")[[1]][max2]
+print(c(Accuracy_AIC=acc2, Cutoff_AIC=cut2))
+
+max3<-which.max(slot(eval_test_BIC,"y.values")[[1]])
+acc3<-slot(eval_test_BIC,"y.values")[[1]][max3]
+cut3<-slot(eval_test_BIC,"x.values")[[1]][max3]
+print(c(Accuracy_BIC=acc3, Cutoff_BIC=cut3))
+
+# confusion matrix with max accuracy cutoff for testing
+#for full 
+pred_test_full <- predict(full, dumtest, type="response")
+pred_test_c_full <- ifelse(pred_test_full >= cut1, 1, 0)
+confusion_test_full<-table(dumtest$Churn, pred_test_c_full)
+confusion_test_full
+  # pred_test_c_full
+  #     0    1
+  #0 1404  152
+  #1  277  280
+accuracy_test_full<-(confusion_test_full[2,2]+confusion_test_full[1,1])/sum(confusion_test_full)
+accuracy_test_full #0.7969711
+# for model_AIC
+pred_test_AIC <- predict(model_AIC, dumtest, type="response")
+pred_test_c_AIC <- ifelse(pred_test_AIC >= cut2, 1, 0)
+confusion_test_AIC<-table(dumtest$Churn, pred_test_c_AIC)
+confusion_test_AIC
+  # pred_test_c_AIC
+  #   0    1
+  #0 1402  154
+  #1  275  282
+accuracy_test_AIC<-(confusion_test_AIC[2,2]+confusion_test_AIC[1,1])/sum(confusion_test_AIC)
+accuracy_test_AIC #0.7969711
+# for model_BIC
+pred_test_BIC <- predict(model_BIC, dumtest, type="response")
+pred_test_c_BIC <- ifelse(pred_test_BIC >= cut3, 1, 0)
+confusion_test_BIC<-table(dumtest$Churn, pred_test_c_BIC)
+confusion_test_BIC
+  #pred_test_c_BIC
+  #     0    1
+  #0 1408  148
+  #1  278  279
+accuracy_test_BIC<-(confusion_test_BIC[2,2]+confusion_test_BIC[1,1])/sum(confusion_test_BIC)
+accuracy_test_BIC #0.7983909
+```
+```{r}
+# lift chart for full
+dumtest$Nchurn<-as.numeric(dumtest$Churn)
+act_testing_full<-dumtest$Nchurn
+pred_test_full <- predict(full,dumtest,type="response")
+df1T<-data.frame(pred_test_full,act_testing_full)
+df1ST<-df1T[order(-pred_test_full),]
+df1ST$Gains<-cumsum(df1ST$act_testing_full)
+plot(df1ST$Gains,type="n",main="full model Gains Chart",xlab="Number of Cases",ylab="Cumulative Success")
+lines(df1ST$Gains)
+abline(0,sum(df1ST$act_testing_full)/nrow(df1ST),lty = 2, col="red")
+
+# lift chart for AIC
+dumtest$Nchurn<-as.numeric(dumtest$Churn)
+act_testing_AIC<-dumtest$Nchurn
+pred_test_AIC <- predict(model_AIC,dumtest,type="response")
+df2T<-data.frame(pred_test_AIC,act_testing_AIC)
+df2ST<-df2T[order(-pred_test_AIC),]
+df2ST$Gains<-cumsum(df2ST$act_testing_AIC)
+plot(df2ST$Gains,type="n",main="model_AIC Gains Chart",xlab="Number of Cases",ylab="Cumulative Success")
+lines(df2ST$Gains)
+abline(0,sum(df2ST$act_testing_AIC)/nrow(df2ST),lty = 2, col="red")
+# lift chart for BIC
+dumtest$Nchurn<-as.numeric(dumtest$Churn)
+act_testing_BIC<-dumtest$Nchurn
+pred_test_BIC <- predict(model_BIC,dumtest,type="response")
+df3T<-data.frame(pred_test_BIC,act_testing_BIC)
+df3ST<-df3T[order(-pred_test_BIC),]
+df3ST$Gains<-cumsum(df3ST$act_testing_BIC)
+plot(df3ST$Gains,type="n",main="model_BIC Gains Chart",xlab="Number of Cases",ylab="Cumulative Success")
+lines(df3ST$Gains)
+abline(0,sum(df3ST$act_testing_BIC)/nrow(df3ST),lty = 2, col="red")
+```
+```{r}
+#for full
+# min misclassification cost for training 
+pred_train_full <-predict(full, dumtrain, type="response")
+pred_train_full1 <-prediction(pred_train_full,dumtrain$Churn)
+cost_train_full=performance(pred_train_full1,"cost",cost.fp=168,cost.fn=949)
+min1<-which.min(slot(cost_train_full,"y.values")[[1]]) 
+cost1<-slot(cost_train_full,"y.values")[[1]][min1]
+cutc1<-slot(cost_train_full,"x.values")[[1]][min1]
+print(c(Cost_Training_full=cost1*nrow(dumtrain), Cutoff_Training_full=cutc1))
+# misclassification cost 
+cutc2<-cutc1
+pred_test_full <- predict(full, dumtest, type="response")
+pred_test_cost_full <- ifelse(pred_test_full >= cutc2, 1, 0)
+table(dumtest$Churn, pred_test_cost_full)
+print(c(Cutoff_Testing=cutc2,Cost_Testing=168*582+69*949))
+```
+```{r}
+#for AIC
+# min misclassification cost for training 
+pred_train_AIC <-predict(model_AIC, dumtrain, type="response")
+pred_train_AIC1 <-prediction(pred_train_AIC,dumtrain$Churn)
+cost_train_AIC=performance(pred_train_AIC1,"cost",cost.fp=168,cost.fn=949)
+min2<-which.min(slot(cost_train_AIC,"y.values")[[1]]) 
+cost2<-slot(cost_train_AIC,"y.values")[[1]][min2]
+cutc3<-slot(cost_train_AIC,"x.values")[[1]][min2]
+print(c(Cost_Training_AIC=cost2*nrow(dumtrain), Cutoff_Training_AIC=cutc3))
+# misclassification cost 
+cutc4<-cutc3
+pred_test_AIC <- predict(model_AIC, dumtest, type="response")
+pred_test_cost_AIC <- ifelse(pred_test_AIC >= cutc4, 1, 0)
+table(dumtest$Churn, pred_test_cost_AIC)
+print(c(Cost_Testing=168*561+70*949, Cutoff_Testing=cutc4))
+```
+```{r}
+#for BIC
+# min misclassification cost for training 
+pred_train_BIC <-predict(model_BIC, dumtrain, type="response")
+pred_train_BIC1 <-prediction(pred_train_BIC,dumtrain$Churn)
+cost_train_BIC=performance(pred_train_BIC1,"cost",cost.fp=168,cost.fn=949)
+min3<-which.min(slot(cost_train_BIC,"y.values")[[1]]) 
+cost3<-slot(cost_train_BIC,"y.values")[[1]][min3]
+cutc5<-slot(cost_train_BIC,"x.values")[[1]][min3]
+print(c(Cost_Training_BIC=cost3*nrow(dumtrain), Cutoff_Training_BIC=cutc5))
+# misclassification cost 
+cutc6<-cutc5
+pred_test_BIC <- predict(model_BIC, dumtest, type="response")
+pred_test_cost_BIC <- ifelse(pred_test_BIC >= cutc6, 1, 0)
+table(dumtest$Churn, pred_test_cost_BIC)
+print(c(Cost_Testing=168*585+65*949, Cutoff_Testing=cutc6))
+```
+
+
+
+
+## Naive Bayes
+
+```{r}
+churn <- complete_base_data
+
+
+churn <- read.csv("/Users/wenxi/Downloads/DataMining/project/complete_base_data.csv")
+churn$gender <- ifelse(churn$gender =="Female", 1, 0)
+churn$Partner <- ifelse(churn$Partner =="Yes", 1, 0)
+churn$Dependents <- ifelse(churn$Dependents =="Yes", 1, 0)
+churn$PhoneService<- ifelse(churn$PhoneService =="Yes", 1, 0)
+churn$MultipleLines <- ifelse(churn$MultipleLines =="Yes", 1, 0)
+churn$InternetService <- ifelse(churn$InternetService =="DSL", 1, ifelse(churn$InternetService =="Fiber optic", 2, 0))
+churn$OnlineSecurity <- ifelse(churn$OnlineSecurity =="Yes", 1, 0)
+churn$OnlineBackup <- ifelse(churn$OnlineBackup =="Yes", 1, 0)
+churn$DeviceProtection <- ifelse(churn$DeviceProtection =="Yes", 1, 0)
+churn$TechSupport <- ifelse(churn$TechSupport =="Yes", 1, 0)
+churn$StreamingTV <- ifelse(churn$StreamingTV =="Yes", 1, 0)
+churn$StreamingMovies <- ifelse(churn$StreamingMovies =="Yes", 1, 0)
+churn$Contract <- ifelse(churn$Contract =="One year", 1, ifelse(churn$Contract =="Two year", 2, 0))
+churn$PaperlessBilling <- ifelse(churn$PaperlessBilling =="Yes", 1, 0)
+churn$PaymentMethod <- ifelse(churn$PaymentMethod =="Electronic check", 1, ifelse(churn$PaymentMethod =="Mailed check", 2, ifelse(churn$PaymentMethod =="Credit card (automatic)", 3, 0)))
+churn$Churn<- ifelse(churn$Churn =="Yes", 1, 0)
+churn$customerID <- NULL
+
+names(churn)
+#create factors
+churn[1:16] <- lapply(churn[1:16],factor)
+churn$tenure_interval<-as.factor(churn$tenure_interval)
+churn$Churn<-as.factor(churn$Churn)
+str(churn)
+
+
+#set 70% training data, 30% validation data
+
+set.seed(12345)
+inTrain<-sample(nrow(churn),0.7*nrow(churn))
+train<-data.frame(churn[inTrain,])
+validation<-data.frame(churn[-inTrain,])
+
+
+# build the model
+library(e1071)
+model<-naiveBayes(Churn~.,data=train)
+model
+
+# predict the validation data with model
+
+prediction<-predict(model,newdata = validation[,-19])
+
+
+
+#confusion matrix
+model$apriori
+table(validation$Churn,prediction,dnn = list('actual','predicted'))
+
+#cost matrix with cutoff=0.5
+table(validation$Churn,prediction,dnn = list('actual','predicted'))
+cost<-(283*(-168))+(-949*176)
+cost
+
+
+# accuracy, sensitivity, specificity
+accuracy<-(1273+381)/(1273+283+176+381)
+accuracy
+sensitivity<-381/(176+381)
+sensitivity
+specificity<-1273/(1273+283)
+specificity
+
+# For class probabilities
+predicted.probability<-predict(model,newdata = validation[,-19],type = "raw")
+predicted.probability
+prob<-predicted.probability[,2]
+PL <- as.numeric(validation$Churn)-1
+df1 <- data.frame(prediction, PL, prob)
+
+
+#lift chart
+df1S <- df1[order(-prob),]
+df1S$Gains <- cumsum(df1S$PL)
+plot(df1S$Gains,type="n",main="Lift Chart",xlab="Number of Cases",ylab="Cumulative Success")
+lines(df1S$Gains,col="blue")
+abline(0,sum(df1S$PL)/nrow(df1S),lty = 2, col="red")
+
+
+# ROC Curve
+
+library(ROCR)
+
+actual<- validation$Churn
+
+pred<- prediction(prob,actual)
+perf<- performance(pred,"tpr","fpr")
+plot(perf,colorize=TRUE)
+
+perf1<-performance(pred,"acc")
+plot(perf1, show.spread.at=seq(0,1,by=0.1),col="red")
+
+
+
+# Cost Matrixs with the best cutoff
+pred<- prediction(prob,actual)
+perf.cost=performance(pred,"cost",cost.fp=168,cost.fn=949)
+min2<-which.min(slot(perf.cost,"y.values")[[1]]) 
+cost2<-slot(perf.cost,"y.values")[[1]][min2]
+cutc3<-slot(perf.cost,"x.values")[[1]][min2]
+print(c(Cost=cost2*nrow(validation), Cutoff=cutc3))
+
+
+
+```
+  
+
+#KNN code
+
+```{r}
+churn <- complete_base_data
+
+
+churn$gender <- ifelse(churn$gender =="Female", 1, 0)
+churn$Partner <- ifelse(churn$Partner =="Yes", 1, 0)
+churn$Dependents <- ifelse(churn$Dependents =="Yes", 1, 0)
+churn$PhoneService<- ifelse(churn$PhoneService =="Yes", 1, 0)
+churn$MultipleLines <- ifelse(churn$MultipleLines =="Yes", 1, 0)
+churn$InternetService <- ifelse(churn$InternetService =="DSL", 1, ifelse(churn$InternetService =="Fiber optic", 2, 0))
+churn$OnlineSecurity <- ifelse(churn$OnlineSecurity =="Yes", 1, 0)
+churn$OnlineBackup <- ifelse(churn$OnlineBackup =="Yes", 1, 0)
+churn$DeviceProtection <- ifelse(churn$DeviceProtection =="Yes", 1, 0)
+churn$TechSupport <- ifelse(churn$TechSupport =="Yes", 1, 0)
+churn$StreamingTV <- ifelse(churn$StreamingTV =="Yes", 1, 0)
+churn$StreamingMovies <- ifelse(churn$StreamingMovies =="Yes", 1, 0)
+churn$Contract <- ifelse(churn$Contract =="One year", 1, ifelse(churn$Contract =="Two year", 2, 0))
+churn$PaperlessBilling <- ifelse(churn$PaperlessBilling =="Yes", 1, 0)
+churn$PaymentMethod <- ifelse(churn$PaymentMethod =="Electronic check", 1, ifelse(churn$PaymentMethod =="Mailed check", 2, ifelse(churn$PaymentMethod =="Credit card (automatic)", 3, 0)))
+churn$Churn<- ifelse(churn$Churn =="Yes", 1, 0)
+churn$customerID <- NULL
+
+#create factors
+#churn[1:16] <- lapply(churn[1:16],factor)
+#churn$tenure_interval<-as.factor(churn$tenure_interval)
+#churn
+#str(churn)
+
+
+#create dummy variables
+library(dummies)
+churn.dum <- dummy.data.frame(churn, names = c("InternetService","Contract", "PaymentMethod","tenure_interval") , sep = ".")
+str(churn.dum)
+```
+
+Method 1 with three dataset:
+```{r}
+set.seed(12345)
+
+inTrain<-sample(nrow(churn.dum),0.7*nrow(churn.dum))
+dftrain<-data.frame(churn.dum[inTrain,])
+dftemp<-data.frame(churn.dum[-inTrain,])
+inVal<-sample(nrow(dftemp),0.7*nrow(dftemp))
+dfvalidation<-data.frame(dftemp[inVal,])
+dftest<-data.frame(dftemp[-inVal,])
+
+dftrain[ ,-26] <- scale(dftrain[ ,-26])
+#View(dftrain)
+dfvalidation[ ,-26] <- scale(dfvalidation[ ,-26])
+dftest[ ,-26] <- scale(dftest[ ,-26])
+
+library(class)
+
+train_input <- as.matrix(dftrain[,-26])
+train_output <- as.vector(dftrain[,26])
+validate_input <- as.matrix(dfvalidation[,-26])
+test_input <- as.matrix(dftest[,-26])
+
+kmax <- 15
+ER1 <- rep(0,kmax)
+ER2 <- rep(0,kmax)
+#
+for (i in 1:kmax){
+prediction <- knn(train_input, train_input,train_output, k=i)
+prediction2 <- knn(train_input, validate_input,train_output, k=i)
+prediction3 <- knn(train_input, test_input,train_output, k=i)
+# The confusion matrix for training data is:
+CM1 <- table(prediction, dftrain$Churn)
+# The training error rate is:
+ER1[i] <- (CM1[1,2]+CM1[2,1])/sum(CM1)
+# The confusion matrix for validation data is: 
+CM2 <- table(prediction2, dfvalidation$Churn)
+ER2[i] <- (CM2[1,2]+CM2[2,1])/sum(CM2)
+}
+plot(c(1,kmax),c(0,0.5),type="n", xlab="k",ylab="Error Rate")
+lines(ER1,col="red")
+lines(ER2,col="blue")
+legend(9, 0.5, c("Training","Validation"),lty=c(1,1), col=c("red","blue"))
+z <- which.min(ER2)
+cat("Minimum Validation Error k:", z)
+
+#Error rate for validation dataset
+prediction3 <- knn(train_input, test_input,train_output, k=z)
+CM3 <- table(prediction3, dftest$Churn)
+CM3
+ER3 <- (CM3[1,2]+CM3[2,1])/sum(CM3)
+ER3
+Accuracy <- 1-ER3
+Accuracy
+
+precision.knn <- CM3[2,2]/(CM3[2,1]+CM3[2,2])
+precision.knn
+sentivity.knn <- CM3[2,2]/(CM3[1,2]+CM3[2,2])
+sentivity.knn
+```
+
+Method 2 with cross validation:
+```{r}
+churn.dum$Churn <- as.factor(churn.dum$Churn)
+library(ISLR)
+library(caret)
+
+set.seed(12345)
+
+inTrain<-sample(nrow(churn.dum),0.7*nrow(churn.dum))
+dftrain<-data.frame(churn.dum[inTrain,])
+dfvalidation<-data.frame(churn.dum[-inTrain,])
+
+ctrl <- trainControl(method="repeatedcv",repeats = 3) 
+knnFit <- train(Churn ~ ., data = dftrain, method = "knn", trControl = ctrl, preProcess = c("center","scale"), tuneLength = 20)
+
+#Output of kNN fit
+knnFit
+
+plot(knnFit)
+
+knnPredict <- predict(knnFit,newdata = dfvalidation,preProcess = c("center","scale") )
+
+#Get the confusion matrix to see accuracy value and other parameter values
+confusionMatrix(knnPredict, dfvalidation$Churn )
+
+```
+
+
+Based on the accuracy, choosing method 1
+```{r}
+#ROC
+library(ROCR)
+# best k-nearest neighbor model
+prediction4 <- knn(train_input, test_input, train_output, k=z, prob=T)
+predicted.probability <- attr(prediction4, "prob")
+predicted.probability <- ifelse(prediction4==1, predicted.probability, 1-predicted.probability)
+pred.knn <- prediction(predicted.probability, dftest$Churn)
+perf.knn <- performance(pred.knn,measure = "tpr", x.measure = "fpr")
+plot(perf.knn, col="blue", main="ROC", xlab = "1-specificity", ylab="sensitivity")
+#plot(perf.knn, col="red", add=T)
+```
+
+```{r}
+#Lift-chart
+# Test data
+actual.test <- dftest$Churn
+df1V <- data.frame(predicted.probability,actual.test)
+df1VS <- df1V[order(-predicted.probability),]
+df1VS$Gains <- cumsum(df1VS$actual.test)
+plot(df1VS$Gains,type="n",main="Validation Data Gains Chart",xlab="Number of Cases",ylab="Cumulative Success")
+lines(df1VS$Gains)
+abline(0,sum(df1VS$actual.test)/nrow(df1VS),lty = 2, col="red")
+```
+
+# Cost matrix
+```{r}
+prediction3 <- knn(train_input, test_input, train_output, k=z, prob=T)
+predicted.probability3 <- attr(prediction3, "prob")
+predicted.probability3 <- ifelse(prediction3 ==1, predicted.probability3, 1-predicted.probability3)
+pred.knn <- prediction(predicted.probability3, dftest$Churn)
+perf.knn <- performance(pred.knn,"cost",cost.fp=168,cost.fn=949)
+min1<-which.min(slot(perf.knn,"y.values")[[1]]) 
+cost1<-slot(perf.knn,"y.values")[[1]][min1]
+cutc1<-slot(perf.knn,"x.values")[[1]][min1]
+print(c(misclass.cost.test=cost1*nrow(dftest), Cutoff_test=cutc1))
+print(c(misclass.cost.test2=cost1*nrow(dftest)/0.3, Cutoff_test=cutc1))
+```
+
+
+#CLASSIFICATION Tree
+
+
+```{r}
+base_data <- complete_base_data
+str(base_data)
+
+base_data$SeniorCitizen <- as.factor(base_data$SeniorCitizen)
+summary(base_data)
+```
+```{r}
+set.seed(12345)
+intrain <- createDataPartition(y = base_data$Churn, p= 0.7, list = FALSE)
+training <- base_data[intrain,]
+testing <- base_data[-intrain,]
+```
+
+```{r}
+summary(training)
+summary(testing)
+```
+
+```{r}
+trctrl <- trainControl(method = "repeatedcv", number = 1000, repeats = 3)
+set.seed(12345)
+dtree_fit <- train(Churn ~., data = training, method = "rpart", parms = list(split = "information"), trControl=trctrl, tuneLength = 5)
+```
+
+```{r}
+#Visualization the tree
+prp(dtree_fit$finalModel, box.palette = "Reds", tweak = 1.2)
+```
+
+```{r}
+#Testing the training model on unseen data
+test_pred <- predict(dtree_fit, newdata = testing)
+```
+
+```{r}
+#Gives us all metrics to validate
+confusionMatrix(test_pred_2, testing$Churn)
+```
+
+
+#ENSEMBLE METHODS
+```{r}
+
+churn <- complete_base_data
+
+churn <- read.csv("G:/Data mining/project/complete_base_data.csv")
+churn$gender <- ifelse(churn$gender =="Female", 1, 0)
+churn$Partner <- ifelse(churn$Partner =="Yes", 1, 0)
+churn$Dependents <- ifelse(churn$Dependents =="Yes", 1, 0)
+churn$PhoneService<- ifelse(churn$PhoneService =="Yes", 1, 0)
+churn$MultipleLines <- ifelse(churn$MultipleLines =="Yes", 1, 0)
+churn$InternetService <- ifelse(churn$InternetService =="DSL", 1, ifelse(churn$InternetService =="Fiber optic", 2, 0))
+churn$OnlineSecurity <- ifelse(churn$OnlineSecurity =="Yes", 1, 0)
+churn$OnlineBackup <- ifelse(churn$OnlineBackup =="Yes", 1, 0)
+churn$DeviceProtection <- ifelse(churn$DeviceProtection =="Yes", 1, 0)
+churn$TechSupport <- ifelse(churn$TechSupport =="Yes", 1, 0)
+churn$StreamingTV <- ifelse(churn$StreamingTV =="Yes", 1, 0)
+churn$StreamingMovies <- ifelse(churn$StreamingMovies =="Yes", 1, 0)
+churn$Contract <- ifelse(churn$Contract =="One year", 1, ifelse(churn$Contract =="Two year", 2, 0))
+churn$PaperlessBilling <- ifelse(churn$PaperlessBilling =="Yes", 1, 0)
+churn$PaymentMethod <- ifelse(churn$PaymentMethod =="Electronic check", 1, ifelse(churn$PaymentMethod =="Mailed check", 2, ifelse(churn$PaymentMethod =="Credit card (automatic)", 3, 0)))
+churn$Churn<- ifelse(churn$Churn =="Yes", 1, 0)
+churn$customerID <- NULL
+
+#create factors
+churn[1:16] <- lapply(churn[1:16],factor)
+
+churn$tenure_interval<-as.factor(churn$tenure_interval)
+churn$Churn<-as.factor(churn$Churn)
+
+churn <- churn[,c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,20,19)]
+```
+
+
+```{r}
+# Data set partition
+set.seed(12345)
+inTrain = sample(nrow(churn), 0.7 * nrow(churn))
+train <- churn[inTrain, ]
+valid <- churn[-inTrain, ]
+```
+
+```{r}
+#set.seed(12345)
+#Bagging model
+library(randomForest)
+bag.churn=randomForest(Churn~., data=train,mtry=19,importance=TRUE)
+bag.churn
+```
+```{r}
+yhat.bag=predict(bag.churn,newdata=valid)
+importance(bag.churn)
+varImpPlot(bag.churn)
+#Confusion Matrix
+table1<-table(yhat.bag,valid$Churn)
+table1
+```
+```{r}
+#accuracy
+accuracy.bag=(table1[1,1]+table1[2,2])/sum(table1)
+accuracy.bag
+```
+
+```{r}
+# install.packages("verification")
+#Cross Validation for Bagging
+churn$Churn <- as.numeric(churn$Churn)-1
+k=10
+n=floor(nrow(churn)/k)
+err.vect=rep(NA,k)
+i=1
+s1=((i-1)*n+1)
+s2=(i*n)
+subset=s1:s2
+cv.train=churn[-subset,]
+cv.test=churn[subset,]
+library('verification')
+library('randomForest')
+for(i in 1:k){
+s1=((i-1)*n+1)
+s2=(i*n)
+subset=s1:s2
+cv.train=churn[-subset,]
+cv.test=churn[subset,]
+fit=randomForest(x=cv.train[,1:19],y=as.factor(cv.train[,20]),mtry=5)
+prediction=predict(fit,newdata=cv.test[,-20],type="prob")[,2]
+err.vect[i]=roc.area(cv.test[,20],prediction)$A
+print(paste("AUC for fold",i,":",err.vect[i]))
+
+}
+print(paste("Average AUC:",mean(err.vect)))
+
+
+```
+
+```{r}
+#RF
+library(randomForest)
+set.seed(12345)
+rf.churn=randomForest(Churn~.,data=train,mtry=5,importance=TRUE)
+rf.churn
+yhat.rf=predict(rf.churn,newdata=valid)
+mean((yhat.rf-valid$PROF)^2)
+importance(rf.churn)
+varImpPlot(rf.churn)
+#Confusion Matrix
+table2 <- table(yhat.rf,valid$Churn)
+table2
+#Accuracy
+accuracy.rf=(table2[1,1]+table2[2,2])/sum(table2)
+accuracy.rf
+```
+
+```{r}
+# install.packages("verification")
+# library('verification')
+#Cross Validation for RF
+library('randomForest')
+for(i in 1:k){
+s1=((i-1)*n+1)
+s2=(i*n)
+subset=s1:s2
+cv.train=churn[-subset,]
+cv.test=churn[subset,]
+fit=randomForest(x=cv.train[,1:19],y=as.factor(cv.train[,20]),mtry=19)
+prediction=predict(fit,newdata=cv.test[,-20],type="prob")[,2]
+err.vect[i]=roc.area(cv.test[,20],prediction)$A
+print(paste("AUC for fold",i,":",err.vect[i]))
+
+}
+print(paste("Average AUC:",mean(err.vect)))
+```
+
+```{r}
+library('randomForest')
+library('ROCR')
+library('gbm')
+#set.seed(12345)
+#ROC Curve for Bagging
+# fit=randomForest(x=train[,1:19],y=train[,20],mtry=19,importance=TRUE)
+# prediction=predict(fit,newdata=valid[,-20],type="prob")[,2]
+# pred.bag <- prediction(prediction,valid[,20])
+# perf<-performance(pred.bag,"tpr", "fpr" )
+plot(perf,col="red",colorize=FALSE,main="ROC")
+abline (a=0, b=1, lty=2)
+
+#ROC Curve for RF
+# fit1=randomForest(x=train[,1:19],y=train[,20],mtry=5,importance=TRUE)
+# prediction1=predict(fit1,newdata=valid[,-20],type="prob")[,2]
+# pred.rf=prediction(prediction1,valid[,20])
+# perf1<-performance(pred.rf,"tpr", "fpr" )
+plot(perf1,col="yellow",colorize=FALSE,add=TRUE)
+#abline (a=0, b=1, lty=2)
+
+#ROC for Boosting
+# fit2=gbm.fit(x=train[,1:19],y=train[,20],distribution="gaussian",n.trees=5000,interaction.depth=4)
+# prediction2=predict(fit2,newdata=valid[,-20],n.trees=5000,type="response")
+# pred.bst <- prediction(prediction2,valid[,20])
+# perf2<-performance(pred.bst,"tpr", "fpr" )
+plot(perf2,col="green",colorize=FALSE,add=TRUE)
+#abline (a=0, b=1, lty=2)
+legend(0.7, 0.25, legend=c("Bagging", "Random Forest","Boosting"),col=c("red", "yellow","green"), lty=1, cex=0.8)
+```
+
+```{r}
+# Bagging with Cost Matrix
+cost.perf.bag= performance(pred.bag,"cost",cost.fp=168,cost.fn=949)
+ind1=which.min(slot(cost.perf.bag,"y.values")[[1]])
+cost1=slot(cost.perf.bag,"y.values")[[1]][[ind1]]
+cutoff1=slot(cost.perf.bag,"x.values")[[1]][[ind1]]
+cost1
+cutoff1
+predicted.bag.ctf <- ifelse(prediction1 >= cutoff1, 1, 0)
+table(valid[,20], predicted.bag.ctf)
+```
+```{r}
+#cost for Bagging
+print(c(Cutoff_Testing=cutoff1,Cost=168*720+61*949))
+```
+
+```{r}
+# RF with Cost Matrix
+cost.perf.rf= performance(pred.rf,"cost",cost.fp=168,cost.fn=949)
+ind2=which.min(slot(cost.perf.rf,"y.values")[[1]])
+cost2=slot(cost.perf.rf,"y.values")[[1]][[ind2]]
+cutoff2=slot(cost.perf.rf,"x.values")[[1]][[ind2]]
+cost2
+cutoff2
+predicted.rf.ctf <- ifelse(prediction1 >= cutoff2, 1, 0)
+table(valid[,20], predicted.rf.ctf)
+```
+
+```{r}
+print(c(Cutoff_Testing=cutoff2,Cost=168*712+61*949))
+```
+
+```{r}
+#Lift Chart for Bagging
+actr <- as.numeric(valid[,20])-1
+dfk <- data.frame(prediction,actr)
+dfks <- dfk[order(prediction,decreasing = TRUE),]
+dfks$Gain <- cumsum(dfks$actr)
+plot(dfks$Gain,type="n",main="Gains Chart",xlab="Number of Cases",ylab="Cumulative Sucess")
+legend(1500, 150, legend=c("Bagging", "Random Forest","Boosting"),col=c("red", "yellow","green"), lty=1, cex=0.8)
+lines(dfks$Gain,col="RED")
+abline(0,sum(dfks$actr)/nrow(dfks),lty=2,col="red")
+
+#Lift Chart for RF
+actr1 <- as.numeric(valid[,20])-1
+dfk1 <- data.frame(prediction1,actr)
+dfks1 <- dfk[order(prediction1,decreasing = TRUE),]
+dfks1$Gain <- cumsum(dfks1$actr)
+#plot(dfks1$Gain,type="n",main="Gains Chart for RF",xlab="Number of Cases",ylab="Cumulative Sucess",add=TRUE)
+lines(dfks1$Gain,col="yellow")
+#abline(0,sum(dfks$actr)/nrow(dfks),lty=2,col="yellow")
+
+#Lift Chart for Boosting
+actr2 <- as.numeric(valid[,20])-1
+dfk2 <- data.frame(prediction2,actr2)
+dfks2 <- dfk2[order(prediction2,decreasing = TRUE),]
+dfks2$Gain <- cumsum(dfks2$actr)
+#plot(dfks2$Gain,type="n",main="Gains Chart for Boosting",xlab="Number of Cases",ylab="Cumulative Sucess",add=TRUE)
+lines(dfks2$Gain,col="green")
+#abline(0,sum(dfks$actr)/nrow(dfks2),lty=2,col="green")
+
+```
+
+```{r}
+#Boosting
+# install.packages("gbm")
+set.seed(12345)
+library(gbm) 
+# str(train)
+boost.train=train
+boost.train$Churn=as.numeric(boost.train$Churn)-1
+boost.valid=valid
+boost.valid$Churn=as.numeric(boost.valid$Churn)-1
+
+# boost.churn=gbm(Churn~.,data=boost.train,distribution="bernoulli",n.trees=5000,interaction.depth=4)
+# plot(boost.churn,i="tenure_interval")
+# yhat.boost=predict(boost.churn,newdata=boost.valid,n.tree=5000,type="response")
+
+fit3=gbm.fit(x=boost.train[,-20],y=boost.train[,20],distribution="bernoulli",n.trees=5000,interaction.depth=4)
+prediction3=predict(fit3,newdata=boost.valid[,-20],n.trees=5000,type="response")
+predicted3 <- ifelse(prediction3>=0.5,1,0)
+
+
+yhat.test=boost.valid[,20]
+(c = table(predicted3,yhat.test))
+(acc = (c[1,1]+c[2,2])/sum(c))
+
+
+pred.bst <- prediction(predicted3,boost.valid[,20])
+perf3<-performance(pred.bst,"tpr", "fpr" )
+plot(perf2,col="green",colorize=FALSE)
+
+
+prediction.bst=prediction(prediction3,boost.valid[,20])
+cost.perf.bst= performance(prediction.bst,"cost",cost.fp=168,cost.fn=949)
+ind3=which.min(slot(cost.perf.bst,"y.values")[[1]])
+cost3=slot(cost.perf.bst,"y.values")[[1]][[ind3]]
+cutoff3=slot(cost.perf.bst,"x.values")[[1]][[ind3]]
+cost3
+cutoff3
+
+
+predicted.bst.ctf <- ifelse(prediction3 >= cutoff3, 1, 0)
+table(boost.valid[,20], predicted.bst.ctf)
+print(c(Cutoff_Testing=cutoff3,Cost=168*633+51*949))
+
+#Lift Chart
+actr3 <- boost.valid[,20]
+dfk3 <- data.frame(prediction3,actr3)
+dfks3 <- dfk3[order(prediction3,decreasing = TRUE),]
+dfks3$Gain <- cumsum(dfks3$actr3)
+plot(dfks3$Gain,type="n",main="Gains Chart for Boosting",xlab="Number of Cases",ylab="Cumulative Sucess")
+lines(dfks3$Gain)
+abline(0,sum(dfks3$actr3)/nrow(dfks3),lty=2,col="red")
+# 
+# yhat.boost1 <- as.numeric(yhat.boost)-1
+# predicted <-ifelse(yhat.boost1>=0.5,1,0)
+# vali<-churn$Churn[-inTrain]
+# table3<- table(predicted,vali)
+# table3
+# 
+# accuracy.bst=(table3[1,1]+table3[2,2])/sum(table3)
+# accuracy.bst
+
+```
+
+```{r}
+#cross validation for boosting
+churn$Churn <- as.numeric(churn$Churn)-1
+k=10
+n=floor(nrow(churn)/k)
+err.vect=rep(NA,k)
+i=1
+s1=((i-1)*n+1)
+s2=(i*n)
+subset=s1:s2
+cv.train=churn[-subset,]
+cv.test=churn[subset,]
+install.packages("verification")
+ library('verification')
+ churn$Churn <- as.numeric(churn$Churn)-1
+# str(churn)
+ k=10
+for(i in 1:k){
+s1=((i-1)*n+1)
+s2=(i*n)
+subset=s1:s2
+cv.train=churn[-subset,]
+cv.test=churn[subset,]
+fit=gbm.fit(x=cv.train[,1:19],y=as.factor(cv.train[,20]),distribution="gaussian",n.trees=5000,interaction.depth=4)
+
+prediction=predict(fit,newdata=cv.test[,-20],n.trees=5000)
+
+err.vect[i]=roc.area(cv.test[,20],prediction)$A
+print(paste("AUC for fold",i,":",err.vect[i]))
+
+}
+print(paste("Average AUC:",mean(err.vect)))
+```
+```{r}
+set.seed(12345)
+library(gbm) 
+# str(train)
+boost.train1=train
+boost.train0=train
+boost.train0$Churn=as.numeric(boost.train0$Churn)-1
+boost.train0=boost.train0[order(boost.train0$Churn),]
+boost.train1$Churn=as.numeric(boost.train1$Churn)-1
+boost.train1=boost.train1[order(boost.train1$Churn),]
+##1312
+boost.train1$Churn <- ifelse(boost.train1$Churn ==1 , 1, NA)
+c1 <-na.omit(boost.train1)
+##3618
+boost.train0$Churn <- ifelse(boost.train0$Churn == 0 , 0 , NA)
+c0 <- na.omit(boost.train0)
+##str(c0)
+##Split 0 Dataset
+inT = sample(nrow(c0), 0.3 * nrow(c0))
+c01 <- c0[inT, ]
+#str(c01)
+c00 <- c0[-inT, ]
+inT1 =sample(nrow(c00),0.5*nrow(c0))
+c02 <- c00[inT1,]
+c03 <- c00[-inT1,]
+
+#str(c02)
+boost.valid=valid
+boost.valid$Churn=as.numeric(boost.valid$Churn)-1
+
+
+boost.train5=rbind(c01,c1)
+boost.train6=rbind(c02,c1)
+boost.train7=rbind(c03,c1)
+
+
+boost.train5 <-na.omit(boost.train5)
+boost.train6 <-na.omit(boost.train6)
+boost.train7 <-na.omit(boost.train7)
+boost.train7$Churn <- as.factor(boost.train7$Churn)
+#str(boost.train6)
+
+
+fit5=gbm.fit(x=boost.train5[,-20],y=boost.train5[,20],distribution="bernoulli",n.trees=5000,interaction.depth=4)
+fit6=gbm.fit(x=boost.train6[,-20],y=boost.train6[,20],distribution="bernoulli",n.trees=5000,interaction.depth=4)
+#fit7=randomForest(x=boost.train7[,1:19],y=boost.train7[,20],mtry=5,importance=TRUE)
+
+
+
+prediction5=predict(fit5,newdata=boost.valid[,-20],n.trees=5000,type="response")
+prediction6=predict(fit6,newdata=boost.valid[,-20],n.trees=5000,type="response")
+#prediction7=predict(fit7,newdata=valid)
+class(prediction7)
+prediction7=as.numeric(prediction7)-1
+predicted8 <- ifelse((prediction5+prediction6)>=1,1,0)
+
+yhat.test=boost.valid[,20]
+(c = table(predicted8,yhat.test))
+(acc = (c[1,1]+c[2,2])/sum(c))
+(sensitivity = (c[2,2])/(c[1,2]+c[2,2]))
+(aacc=(c[2,2])/(c[2,1]+c[2,2]+c[1,2]))
+```
