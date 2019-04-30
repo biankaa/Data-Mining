@@ -1,0 +1,92 @@
+credit <- read.csv("G:/Data mining/HW5/credit3 (1) .csv",stringsAsFactors=F)
+credit$NPV<-gsub(",","",credit$NPV)
+credit$AMOUNT_REQUESTED<-gsub(",","",credit$AMOUNT_REQUESTED)
+credit$CREDIT_EXTENDED <- gsub(",","",credit$CREDIT_EXTENDED)
+
+credit$NPV <- as.numeric(credit$NPV)
+credit$AMOUNT_REQUESTED <- as.numeric(credit$AMOUNT_REQUESTED)
+credit$CREDIT_EXTENDED <- as.numeric(credit$CREDIT_EXTENDED)
+credit$PROF <- ifelse(credit$NPV>0,1,0)
+
+
+credit[,1] <- NULL
+credit$CREDIT_EXTENDED<- NULL
+
+
+
+library(dummies)
+credit<-dummy.data.frame(credit,names=c("CHK_ACCT","SAV_ACCT","HISTORY","JOB","TYPE"),sep=".")
+credit1=credit
+credit$NPV <- NULL
+
+set.seed(12345)
+creditsc<-scale(credit[1:40])
+km1<-kmeans(creditsc,5,nstart=20)
+km1
+
+Exhibit1<-dist(km1$centers)
+Exhibit1
+
+cluster <- table(km1$cluster)
+barplot(cluster/1000,main="Percentage of people in each cluster",xlab="Cluster Id")
+ 
+counts <- table(credit$PROF,km1$cluster)
+barplot(counts,main="average of NPV split up by Cluster Id")
+ 
+credit$cluster <- km1$cluster
+
+c1<-mean(credit$NPV[credit$cluster==1])
+c3<-mean(credit$NPV[credit$cluster==3])
+c4<-mean(credit$NPV[credit$cluster==4])
+c5<-mean(credit$NPV[credit$cluster==5])
+meanNPV<-rbind(c1,c2,c3,c4,c5)
+Exhibit2<-data.frame(meanNPV)
+Exhibit2
+
+km2<-kmeans(creditsc,4,nstart=20)
+km2
+
+creditar<-credit[,c(2:10,13:17,19:23,29,41)]
+creditar<-dummy.data.frame(creditar,names=c("EMPLOYMENT"),sep=".")
+names(creditar)
+
+f <- function(x){ 
+  x=factor(x)
+} 
+creditar[,1:25] <- lapply(creditar[,1:25],f)
+str(creditar)
+
+library(arules)
+
+Arule<-sort(Arule,decreasing = TRUE,by="confidence")
+
+summary(Arule)
+
+plot(Arule)
+
+inspect(Arule[1:5])
+
+totalprofit<-credit1[,c(2:10,13:17,19:23,29,41)]
+totalprofit<-dummy.data.frame(totalprofit,names=c("EMPLOYMENT"),sep=".")
+names(totalprofit)
+
+sum(totalprofit$NPV[totalprofit$CHK_ACCT.3==1&totalprofit$HISTORY.4==1&totalprofit$OWN_RES ==1])
+
+
+credit2<-data.frame(credit$PROF,credit$cluster)
+credit2<-dummy.data.frame(credit2,names=c("credit.cluster"),sep=".")
+
+
+names(credit2)
+
+f2 <- function(x){ 
+  x=factor(x)
+} 
+credit2[,1:6] <- lapply(credit2[,1:6],f2)
+rules<-apriori(data=credit2,parameter = list(supp=0.01,conf=0.7),appearance = list(default="lhs",rhs="credit.PROF=1"),control=list(verbose=F))
+rules<-sort(rules,decreasing = TRUE,by="confidence")
+summary(rules)
+
+inspect(rules[1])
+
+
