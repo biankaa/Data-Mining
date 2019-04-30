@@ -1,4 +1,4 @@
-credit <- read.csv("G:/Data mining/HW5/credit3 (1) .csv",stringsAsFactors=F)
+credit <- read.csv("credit3 (1) .csv",stringsAsFactors=F)
 credit$NPV<-gsub(",","",credit$NPV)
 credit$AMOUNT_REQUESTED<-gsub(",","",credit$AMOUNT_REQUESTED)
 credit$CREDIT_EXTENDED <- gsub(",","",credit$CREDIT_EXTENDED)
